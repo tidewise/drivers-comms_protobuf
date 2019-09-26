@@ -1,18 +1,14 @@
 <package>
   <description brief="Base code to create communication channels using protocol buffers and iodrivers_base">
-  
   </description>
   <author>Sylvain Joyeux/sylvain.joyeux@tidewise.io</author>
-  <license></license>
-  <url>http://</url>
-  <logo>http://</logo>
+  <license>BSD 3-clause</license>
+
   <depend package="base/cmake" />
-  <!--
-   To add any dependencies use the depend tag
-  <depend package="dummy-dependency-0" />
-	...
-  <depend package="dummy-dependency-n-1" />
-  <depend package="dummy-dependency-n" />
-  -->
   <depend package="drivers/iodrivers_base" />
+  <depend package="protobuf-compiler" />
+  <depend package="protobuf-cxx" />
+
+  <test_depend package="google-test" />
+  <test_depend package="google-mock" />
 </package>
