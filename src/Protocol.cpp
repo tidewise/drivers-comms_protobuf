@@ -1,3 +1,4 @@
+#include <cstring>
 #include <comms_protobuf/Protocol.hpp>
 
 using namespace std;
@@ -32,7 +33,7 @@ int protocol::extractPacket(uint8_t const* buffer, size_t size,
     if (payload_length > max_payload_size) {
         return -1;
     }
-    if (size < payload_length + PACKET_OVERHEAD) {
+    if (size < payload_length + PACKET_MIN_OVERHEAD) {
         return 0;
     }
 
@@ -47,6 +48,28 @@ int protocol::extractPacket(uint8_t const* buffer, size_t size,
     return 2 + payload_end - buffer;
 }
 
+std::pair<uint8_t const*, uint8_t const*> protocol::getPayload(uint8_t const* buffer) {
+    auto parsed_length = parseLength(buffer + 2);
+    return make_pair(parsed_length.second, parsed_length.first + parsed_length.second);
+}
+
+uint8_t* protocol::encodeFrame(uint8_t* buffer,
+                               uint8_t const* payload_begin,
+                               uint8_t const* payload_end) {
+    buffer[0] = SYNC_0;
+    buffer[1] = SYNC_1;
+
+    size_t payload_length = payload_end - payload_begin;
+    uint8_t* length_end = encodeLength(buffer + 2, payload_length);
+    std::memcpy(length_end, payload_begin, payload_length);
+
+    uint8_t* buffer_end = length_end + payload_length + 2;
+    uint16_t calculated_crc = crc(buffer + 2, buffer_end - 2);
+    buffer_end[-2] = calculated_crc & 0xFF;
+    buffer_end[-1] = (calculated_crc >> 8) & 0xFF;
+    return buffer_end;
+}
+
 pair<uint32_t, uint8_t const*> protocol::parseLength(uint8_t const* begin) {
     uint32_t length = 0;
     for (size_t i = 0; i < PACKET_MAX_PAYLOAD_SIZE_FIELD_LENGTH; ++i) {
@@ -57,6 +80,20 @@ pair<uint32_t, uint8_t const*> protocol::parseLength(uint8_t const* begin) {
         }
     }
     return make_pair(0, nullptr);
+}
+
+uint8_t* protocol::encodeLength(uint8_t* begin, size_t length) {
+    uint8_t* ptr = begin;
+    for (size_t i = 0; i < PACKET_MAX_PAYLOAD_SIZE_FIELD_LENGTH; ++i) {
+        *ptr = length & 0x7F;
+        length >>= 7;
+        if (!length) {
+            return ptr + 1;
+        }
+
+        *(ptr++) |= 0x80;
+    }
+    return nullptr;
 }
 
 uint16_t protocol::crc(uint8_t const* begin, uint8_t const* end) {

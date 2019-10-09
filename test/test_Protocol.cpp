@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <gmock/gmock.h>
 #include <comms_protobuf/Protocol.hpp>
 
 // All CRCs computed with https://www.lammertbies.nl/comm/info/crc-calculation.html
@@ -6,6 +7,7 @@
 
 using namespace std;
 using namespace comms_protobuf;
+using ::testing::ElementsAreArray;
 
 struct ProtocolTest : public ::testing::Test {
 };
@@ -38,6 +40,35 @@ TEST_F(ProtocolTest, it_refuses_decoding_of_a_four_byte_vla) {
     ASSERT_EQ(nullptr, parsed.second);
 }
 
+TEST_F(ProtocolTest, it_encodes_a_single_byte_vla) {
+    uint8_t buffer[1] = { 0x10 };
+    uint8_t const* end = protocol::encodeLength(buffer, 0x10);
+    ASSERT_EQ(0x10, buffer[0]);
+    ASSERT_EQ(buffer + 1, end);
+}
+
+TEST_F(ProtocolTest, it_encodes_a_two_byte_vla) {
+    uint8_t buffer[2] = { 0x10 };
+    uint8_t const* end = protocol::encodeLength(buffer, 0x805);
+    ASSERT_EQ(0x85, buffer[0]);
+    ASSERT_EQ(0x10, buffer[1]);
+    ASSERT_EQ(buffer + 2, end);
+}
+
+TEST_F(ProtocolTest, it_encodes_a_three_byte_vla) {
+    uint8_t buffer[3] = { 0x10 };
+    uint8_t const* end = protocol::encodeLength(buffer, 0x100805);
+    ASSERT_EQ(0x85, buffer[0]);
+    ASSERT_EQ(0x90, buffer[1]);
+    ASSERT_EQ(0x40, buffer[2]);
+    ASSERT_EQ(buffer + 3, end);
+}
+
+TEST_F(ProtocolTest, it_refuses_encoding_of_a_four_byte_vla) {
+    uint8_t buffer[4];
+    ASSERT_EQ(nullptr, protocol::encodeLength(buffer, 0x10888888));
+}
+
 TEST_F(ProtocolTest, it_computes_the_CRC) {
     uint8_t buffer[3] = { 0x85, 0x90, 0x40 };
     uint16_t crc = protocol::crc(buffer, buffer + 3);
@@ -49,11 +80,28 @@ TEST_F(ProtocolTest, it_recognizes_a_well_formed_packet) {
     ASSERT_EQ(10, protocol::extractPacket(buffer, 10, 100));
 }
 
+TEST_F(ProtocolTest, it_returns_the_payload_range_of_a_well_formed_packet) {
+    uint8_t buffer[10] = { 0xB5, 0x62, 0x05, 1, 2, 3, 4, 5, 0x37, 0xF0 };
+    auto payload = protocol::getPayload(buffer);
+    ASSERT_EQ(buffer + 3, payload.first);
+    ASSERT_EQ(buffer + 8, payload.second);
+}
+
 TEST_F(ProtocolTest, it_handles_a_well_formed_packet_that_arrives_progressively) {
     uint8_t buffer[10] = { 0xB5, 0x62, 0x05, 1, 2, 3, 4, 5, 0x37, 0xF0 };
     for (int i = 0; i < 9; ++i) {
         ASSERT_EQ(0, protocol::extractPacket(buffer, i, 100));
     }
+}
+
+TEST_F(ProtocolTest, it_creates_a_well_formed_packet) {
+    uint8_t buffer[10];
+    uint8_t payload[5] = { 1, 2, 3, 4, 5 };
+
+    protocol::encodeFrame(buffer, payload, payload + 5);
+
+    uint8_t expected[] = { 0xB5, 0x62, 0x05, 1, 2, 3, 4, 5, 0x37, 0xF0 };
+    ASSERT_THAT(buffer, ElementsAreArray(expected));
 }
 
 TEST_F(ProtocolTest, it_jumps_to_the_first_SYNC_0_byte) {
