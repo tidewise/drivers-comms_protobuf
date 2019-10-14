@@ -6,10 +6,6 @@ using namespace comms_protobuf;
 
 int protocol::extractPacket(uint8_t const* buffer, size_t size,
                             size_t max_payload_size) {
-    if (max_payload_size > PACKET_MAX_PAYLOAD_SIZE) {
-        throw std::invalid_argument("extractPacket: max_payload_size argument bigger "
-                                    "than hardcoded PACKET_MAX_PAYLOAD_SIZE");
-    }
     size_t start = 0;
     for (start = 0; start < size; ++start) {
         if (buffer[start] == SYNC_0) {
@@ -24,7 +20,7 @@ int protocol::extractPacket(uint8_t const* buffer, size_t size,
         return 0;
     }
 
-    auto parsed_length = parseLength(buffer + 2);
+    auto parsed_length = parseLength(buffer + 2, buffer + size);
     auto payload_length = parsed_length.first;
     auto length_field_end = parsed_length.second;
     if (!length_field_end) {
@@ -48,52 +44,87 @@ int protocol::extractPacket(uint8_t const* buffer, size_t size,
     return 2 + payload_end - buffer;
 }
 
-std::pair<uint8_t const*, uint8_t const*> protocol::getPayload(uint8_t const* buffer) {
-    auto parsed_length = parseLength(buffer + 2);
-    return make_pair(parsed_length.second, parsed_length.first + parsed_length.second);
+std::pair<uint8_t const*, uint8_t const*> protocol::getPayload(
+    uint8_t const* buffer, uint8_t const* buffer_end
+) {
+    auto parsed_length = parseLength(buffer + 2, buffer_end);
+    auto payload_end = parsed_length.first + parsed_length.second;
+    if (payload_end > buffer_end) {
+        throw std::invalid_argument(
+            "getPayload: provided buffer is not big enough to contain payload "
+            "of the encoded length (" + to_string(parsed_length.first) + ") bytes. "
+            "Would have expected a buffer of size " + to_string(payload_end - buffer) +
+            ", but got " + to_string(buffer_end - buffer)
+        );
+    }
+    return make_pair(parsed_length.second, payload_end);
 }
 
-uint8_t* protocol::encodeFrame(uint8_t* buffer,
+uint8_t* protocol::encodeFrame(uint8_t* buffer, uint8_t* buffer_end,
                                uint8_t const* payload_begin,
                                uint8_t const* payload_end) {
+    validateEncodingBufferSize(buffer_end - buffer, payload_end - payload_begin);
+
     buffer[0] = SYNC_0;
     buffer[1] = SYNC_1;
 
     size_t payload_length = payload_end - payload_begin;
-    uint8_t* length_end = encodeLength(buffer + 2, payload_length);
+    uint8_t* length_end = encodeLength(buffer + 2, buffer_end, payload_length);
     std::memcpy(length_end, payload_begin, payload_length);
 
-    uint8_t* buffer_end = length_end + payload_length + 2;
-    uint16_t calculated_crc = crc(buffer + 2, buffer_end - 2);
-    buffer_end[-2] = calculated_crc & 0xFF;
-    buffer_end[-1] = (calculated_crc >> 8) & 0xFF;
-    return buffer_end;
+    uint8_t* message_end = length_end + payload_length + 2;
+    uint16_t calculated_crc = crc(buffer + 2, message_end - 2);
+    message_end[-2] = calculated_crc & 0xFF;
+    message_end[-1] = (calculated_crc >> 8) & 0xFF;
+    return message_end;
 }
 
-pair<uint32_t, uint8_t const*> protocol::parseLength(uint8_t const* begin) {
-    uint32_t length = 0;
-    for (size_t i = 0; i < PACKET_MAX_PAYLOAD_SIZE_FIELD_LENGTH; ++i) {
-        uint32_t b = begin[i];
-        length |= (b & 0x7F) << (i * 7);
+pair<size_t, uint8_t const*> protocol::parseLength(
+    uint8_t const* begin, uint8_t const* end
+) {
+    size_t length = 0;
+    uint8_t const* max_end = std::min(begin + sizeof(size_t), end);
+
+    int shift = 0;
+    for (auto ptr = begin; ptr < max_end; ++ptr, shift += 7) {
+        size_t b = *ptr;
+        length |= (b & 0x7F) << shift;
         if ((b & 0x80) == 0) {
-            return make_pair(length, begin + i + 1);
+            return make_pair(length, ptr + 1);
         }
     }
     return make_pair(0, nullptr);
 }
 
-uint8_t* protocol::encodeLength(uint8_t* begin, size_t length) {
-    uint8_t* ptr = begin;
-    for (size_t i = 0; i < PACKET_MAX_PAYLOAD_SIZE_FIELD_LENGTH; ++i) {
-        *ptr = length & 0x7F;
+size_t protocol::getLengthEncodedSize(size_t length) {
+    int size = 0;
+    while (length) {
+        size += 1;
         length >>= 7;
-        if (!length) {
+    }
+    if (size > 8) {
+        throw std::invalid_argument("given length cannot be encoded on 8 bytes");
+    }
+    return size;
+}
+
+uint8_t* protocol::encodeLength(uint8_t* begin, uint8_t* end, size_t length) {
+    size_t remaining_length = length;
+    for (uint8_t* ptr = begin; ptr < end; ++ptr) {
+        *ptr = remaining_length & 0x7F;
+        remaining_length >>= 7;
+        if (!remaining_length) {
             return ptr + 1;
         }
 
-        *(ptr++) |= 0x80;
+        *ptr |= 0x80;
     }
-    return nullptr;
+    throw std::invalid_argument(
+        "encodeLength: provided buffer too small to contain the given length: " +
+        to_string(end - begin) + " bytes available, needed " +
+        to_string(getLengthEncodedSize(length)) + " bytes to encode " +
+        to_string(length)
+    );
 }
 
 uint16_t protocol::crc(uint8_t const* begin, uint8_t const* end) {
@@ -112,4 +143,22 @@ uint16_t protocol::crc(uint8_t const* begin, uint8_t const* end) {
     }
 
     return crc;
+}
+
+size_t protocol::validateEncodingBufferSize(
+    size_t buffer_length, size_t payload_length
+) {
+    size_t length_encoded_size = getLengthEncodedSize(payload_length);
+    // NOTE: MIN_OVERHEAD accounts for one byte of length, thus the -1
+    size_t expected_buffer_length = PACKET_MIN_OVERHEAD +
+                                    payload_length + length_encoded_size - 1;
+    if (expected_buffer_length > buffer_length) {
+        throw std::invalid_argument(
+            "encodeFrame: provided buffer is too small. It needed to be " +
+            std::to_string(expected_buffer_length) +
+            " bytes for this particular message, but was only " +
+            to_string(buffer_length) + " bytes long"
+        );
+    }
+    return expected_buffer_length;
 }

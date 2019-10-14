@@ -23,7 +23,7 @@ struct ChannelTest : public ::testing::Test, iodrivers_base::Fixture<TestChannel
 
         uint8_t buffer[1024];
         uint8_t* end = protocol::encodeFrame(
-            buffer, &marshalled[0], &marshalled[0] + msg.ByteSizeLong()
+            buffer, buffer + 1024, &marshalled[0], &marshalled[0] + msg.ByteSizeLong()
         );
         this->pushDataToDriver(buffer, end);
     }
@@ -38,7 +38,7 @@ TEST_F(ChannelTest, it_can_send_a_message) {
 
     auto buffer = readDataFromDriver();
     ASSERT_GT(protocol::extractPacket(&buffer[0], buffer.size(), 100), 0);
-    auto payload_range = protocol::getPayload(&buffer[0]);
+    auto payload_range = protocol::getPayload(&buffer[0], &buffer[0] + buffer.size());
     std::string marshalled(payload_range.first, payload_range.second);
 
     test_channel::Local received;

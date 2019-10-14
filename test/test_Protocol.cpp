@@ -12,61 +12,105 @@ using ::testing::ElementsAreArray;
 struct ProtocolTest : public ::testing::Test {
 };
 
+TEST_F(ProtocolTest, it_computes_the_encoded_size_of_various_length) {
+    size_t size = 1;
+    for (int i = 0; i < 7; ++i) {
+        ASSERT_EQ(i + 1, protocol::getLengthEncodedSize(size));
+        size = (size << 8) | 0x80;
+    }
+}
+
+TEST_F(ProtocolTest, it_throws_for_more_than_8_bytes) {
+    ASSERT_THROW(protocol::getLengthEncodedSize(0x8080808080808080),
+                 invalid_argument);
+}
+
+TEST_F(ProtocolTest, it_validates_that_a_buffer_is_big_enough_to_contain_a_full_message) {
+    ASSERT_EQ(6 + 0x100, protocol::validateEncodingBufferSize(6 + 0x100, 0x100));
+}
+
+TEST_F(ProtocolTest, validation_throws_if_the_buffer_is_too_small) {
+    ASSERT_THROW(protocol::validateEncodingBufferSize(5 + 0x100, 0x100),
+                 std::invalid_argument);
+}
+
+TEST_F(ProtocolTest, it_validates_a_buffer_size_that_is_too_big) {
+    ASSERT_EQ(6 + 0x100, protocol::validateEncodingBufferSize(50 + 0x100, 0x100));
+}
+
 TEST_F(ProtocolTest, it_decodes_a_single_byte_vla) {
     uint8_t buffer[1] = { 0x10 };
-    auto parsed = protocol::parseLength(buffer);
+    auto parsed = protocol::parseLength(buffer, buffer + 1);
     ASSERT_EQ(0x10, parsed.first);
     ASSERT_EQ(buffer + 1, parsed.second);
 }
 
 TEST_F(ProtocolTest, it_decodes_a_two_byte_vla) {
     uint8_t buffer[2] = { 0x85, 0x10 };
-    auto parsed = protocol::parseLength(buffer);
+    auto parsed = protocol::parseLength(buffer, buffer + 2);
     ASSERT_EQ(0x805, parsed.first);
     ASSERT_EQ(buffer + 2, parsed.second);
 }
 
+TEST_F(ProtocolTest, it_returns_invalid_if_a_two_byte_vla_is_found_in_a_one_byte_buffer) {
+    uint8_t buffer[2] = { 0x85, 0x10 };
+    auto parsed = protocol::parseLength(buffer, buffer + 1);
+    ASSERT_EQ(0, parsed.first);
+    ASSERT_EQ(nullptr, parsed.second);
+}
+
 TEST_F(ProtocolTest, it_decodes_a_three_byte_vla) {
     uint8_t buffer[3] = { 0x85, 0x90, 0x40 };
-    auto parsed = protocol::parseLength(buffer);
+    auto parsed = protocol::parseLength(buffer, buffer + 3);
     ASSERT_EQ(0x100805, parsed.first);
     ASSERT_EQ(buffer + 3, parsed.second);
 }
 
-TEST_F(ProtocolTest, it_refuses_decoding_of_a_four_byte_vla) {
-    uint8_t buffer[4] = { 0x85, 0x90, 0x80, 1 };
-    auto parsed = protocol::parseLength(buffer);
+TEST_F(ProtocolTest, it_returns_invalid_if_a_three_byte_vla_is_found_in_a_two_byte_buffer) {
+    uint8_t buffer[3] = { 0x85, 0x90, 0x40 };
+    auto parsed = protocol::parseLength(buffer, buffer + 2);
     ASSERT_EQ(0, parsed.first);
     ASSERT_EQ(nullptr, parsed.second);
 }
 
 TEST_F(ProtocolTest, it_encodes_a_single_byte_vla) {
     uint8_t buffer[1] = { 0x10 };
-    uint8_t const* end = protocol::encodeLength(buffer, 0x10);
+    uint8_t const* end = protocol::encodeLength(buffer, buffer + 1, 0x10);
     ASSERT_EQ(0x10, buffer[0]);
     ASSERT_EQ(buffer + 1, end);
 }
 
+TEST_F(ProtocolTest, it_throws_if_encoding_a_single_byte_vla_in_a_zero_byte_buffer) {
+    ASSERT_THROW(protocol::encodeLength(nullptr, nullptr, 0x10), std::invalid_argument);
+}
+
 TEST_F(ProtocolTest, it_encodes_a_two_byte_vla) {
-    uint8_t buffer[2] = { 0x10 };
-    uint8_t const* end = protocol::encodeLength(buffer, 0x805);
+    uint8_t buffer[2];
+    uint8_t const* end = protocol::encodeLength(buffer, buffer + 2, 0x805);
     ASSERT_EQ(0x85, buffer[0]);
     ASSERT_EQ(0x10, buffer[1]);
     ASSERT_EQ(buffer + 2, end);
 }
 
+TEST_F(ProtocolTest, it_throws_if_encoding_a_two_byte_vla_in_a_one_byte_buffer) {
+    uint8_t buffer[1];
+    ASSERT_THROW(protocol::encodeLength(buffer, buffer + 1, 0x805),
+                 std::invalid_argument);
+}
+
 TEST_F(ProtocolTest, it_encodes_a_three_byte_vla) {
-    uint8_t buffer[3] = { 0x10 };
-    uint8_t const* end = protocol::encodeLength(buffer, 0x100805);
+    uint8_t buffer[3];
+    uint8_t const* end = protocol::encodeLength(buffer, buffer + 3, 0x100805);
     ASSERT_EQ(0x85, buffer[0]);
     ASSERT_EQ(0x90, buffer[1]);
     ASSERT_EQ(0x40, buffer[2]);
     ASSERT_EQ(buffer + 3, end);
 }
 
-TEST_F(ProtocolTest, it_refuses_encoding_of_a_four_byte_vla) {
-    uint8_t buffer[4];
-    ASSERT_EQ(nullptr, protocol::encodeLength(buffer, 0x10888888));
+TEST_F(ProtocolTest, it_throws_if_encoding_a_three_byte_vla_in_a_two_byte_buffer) {
+    uint8_t buffer[2];
+    ASSERT_THROW(protocol::encodeLength(buffer, buffer + 2, 0x100805),
+                 std::invalid_argument);
 }
 
 TEST_F(ProtocolTest, it_computes_the_CRC) {
@@ -82,9 +126,15 @@ TEST_F(ProtocolTest, it_recognizes_a_well_formed_packet) {
 
 TEST_F(ProtocolTest, it_returns_the_payload_range_of_a_well_formed_packet) {
     uint8_t buffer[10] = { 0xB5, 0x62, 0x05, 1, 2, 3, 4, 5, 0x37, 0xF0 };
-    auto payload = protocol::getPayload(buffer);
+    auto payload = protocol::getPayload(buffer, buffer + 10);
     ASSERT_EQ(buffer + 3, payload.first);
     ASSERT_EQ(buffer + 8, payload.second);
+}
+
+TEST_F(ProtocolTest, it_throws_if_the_payload_size_and_buffer_size_are_incompatible) {
+    uint8_t buffer[10] = { 0xB5, 0x62, 0x05, 1, 2, 3, 4, 5, 0x37, 0xF0 };
+    ASSERT_THROW(protocol::getPayload(buffer, buffer + 7),
+                 std::invalid_argument);
 }
 
 TEST_F(ProtocolTest, it_handles_a_well_formed_packet_that_arrives_progressively) {
@@ -98,10 +148,19 @@ TEST_F(ProtocolTest, it_creates_a_well_formed_packet) {
     uint8_t buffer[10];
     uint8_t payload[5] = { 1, 2, 3, 4, 5 };
 
-    protocol::encodeFrame(buffer, payload, payload + 5);
+    uint8_t* end = protocol::encodeFrame(buffer, buffer + 10, payload, payload + 5);
+    ASSERT_EQ(end, buffer + 10);
 
     uint8_t expected[] = { 0xB5, 0x62, 0x05, 1, 2, 3, 4, 5, 0x37, 0xF0 };
     ASSERT_THAT(buffer, ElementsAreArray(expected));
+}
+
+TEST_F(ProtocolTest, it_throws_if_trying_to_encode_a_packet_in_a_buffer_too_small) {
+    uint8_t buffer[10];
+    uint8_t payload[5] = { 1, 2, 3, 4, 5 };
+
+    ASSERT_THROW(protocol::encodeFrame(buffer, buffer + 9, payload, payload + 5),
+                 std::invalid_argument);
 }
 
 TEST_F(ProtocolTest, it_jumps_to_the_first_SYNC_0_byte) {

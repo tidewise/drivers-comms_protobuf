@@ -33,7 +33,9 @@ namespace comms_protobuf {
 
     public:
         static size_t getBufferSizeFromMessageSize(size_t message_size) {
-            return (protocol::PACKET_MAX_OVERHEAD + message_size) * 10;
+            return (protocol::PACKET_MIN_OVERHEAD +
+                    protocol::getLengthEncodedSize(message_size) +
+                    message_size) * 10;
         }
 
         /** @arg max_message_size the maximum marshalled size of a Remote message
@@ -60,9 +62,12 @@ namespace comms_protobuf {
             base::Time deadline = base::Time::now() + timeout;
             Remote result;
             while (true) {
-                readPacket(&m_receive_buffer[0], m_receive_buffer.size(),
-                           timeout, first_byte_timeout);
-                auto payload_range = protocol::getPayload(&m_receive_buffer[0]);
+                size_t size = readPacket(&m_receive_buffer[0], m_receive_buffer.size(),
+                                         timeout, first_byte_timeout);
+                auto payload_range = protocol::getPayload(
+                    &m_receive_buffer[0],
+                    &m_receive_buffer[0] + size
+                );
 
                 bool success = result.ParseFromString(
                     std::string(reinterpret_cast<char const*>(payload_range.first),
@@ -82,7 +87,8 @@ namespace comms_protobuf {
         }
 
         void write(Local const& message) {
-            uint8_t* end = protocol::encodeFrame(&m_send_buffer[0], message);
+            uint8_t* end = protocol::encodeFrame(
+                &m_send_buffer[0], &m_send_buffer[0] + m_send_buffer.size(), message);
             writePacket(&m_send_buffer[0], end - &m_send_buffer[0]);
         }
     };
