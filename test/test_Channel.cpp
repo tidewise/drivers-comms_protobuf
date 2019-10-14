@@ -55,3 +55,10 @@ TEST_F(ChannelTest, it_can_receive_a_message) {
     test_channel::Remote received = driver.read();
     ASSERT_EQ(10, received.something_else());
 }
+
+TEST_F(ChannelTest, it_throws_if_receiving_a_message_that_is_valid_for_extractPacket_but_invalid_for_protobuf) {
+    uint8_t buffer[10] = { 0xB5, 0x62, 0x05, 1, 2, 3, 4, 5, 0x37, 0xF0 };
+    pushDataToDriver(buffer, buffer + 10);
+
+    ASSERT_THROW(driver.read(), InvalidProtobufMessage);
+}

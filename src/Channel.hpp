@@ -5,6 +5,13 @@
 #include <comms_protobuf/Protocol.hpp>
 
 namespace comms_protobuf {
+    /** Exception thrown in read() when a packet was valid for the underlying protocol,
+     * but could not be unmarshalled by the protocol buffers
+     */
+    struct InvalidProtobufMessage : public std::runtime_error {
+        using std::runtime_error::runtime_error;
+    };
+
     /**
      * A communication channel using protocol buffer messages
      *
@@ -59,31 +66,25 @@ namespace comms_protobuf {
         }
 
         Remote read(base::Time const& timeout, base::Time const& first_byte_timeout) {
-            base::Time deadline = base::Time::now() + timeout;
-            Remote result;
-            while (true) {
-                size_t size = readPacket(&m_receive_buffer[0], m_receive_buffer.size(),
-                                         timeout, first_byte_timeout);
-                auto payload_range = protocol::getPayload(
-                    &m_receive_buffer[0],
-                    &m_receive_buffer[0] + size
-                );
+            size_t size = readPacket(&m_receive_buffer[0], m_receive_buffer.size(),
+                                        timeout, first_byte_timeout);
+            auto payload_range = protocol::getPayload(
+                &m_receive_buffer[0],
+                &m_receive_buffer[0] + size
+            );
 
-                bool success = result.ParseFromString(
-                    std::string(reinterpret_cast<char const*>(payload_range.first),
-                                reinterpret_cast<char const*>(payload_range.second))
+            Remote result;
+            bool success = result.ParseFromString(
+                std::string(reinterpret_cast<char const*>(payload_range.first),
+                            reinterpret_cast<char const*>(payload_range.second))
+            );
+            if (!success) {
+                throw InvalidProtobufMessage(
+                    "a valid packet was received, but it could not be successfully "\
+                    "unmarshalled by the protocol buffer implementation"
                 );
-                if (success) {
-                    return result;
-                }
-                else if (deadline < base::Time::now()) {
-                    throw iodrivers_base::TimeoutError(
-                        iodrivers_base::TimeoutError::PACKET,
-                        "packets were received, but none was successfully unmarshalled "\
-                        "by the protocol buffer implementation"
-                    );
-                }
             }
+            return result;
         }
 
         void write(Local const& message) {
