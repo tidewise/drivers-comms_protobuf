@@ -124,6 +124,20 @@ TEST_F(ProtocolTest, it_recognizes_a_well_formed_packet) {
     ASSERT_EQ(10, protocol::extractPacket(buffer, 10, 100));
 }
 
+TEST_F(ProtocolTest, it_recognizes_partial_packets) {
+    vector<uint8_t> buffer = { 0xB5, 0x62, 0x85, 0x10 };
+    buffer.resize(4 + 0x805);
+    uint16_t crc = protocol::crc(&buffer[2], &buffer[buffer.size()]);
+    buffer.push_back(crc & 0xFF);
+    buffer.push_back((crc >> 8) & 0xFF);
+
+    for (size_t i = 0; i < buffer.size(); ++i) {
+        vector<uint8_t> current_buffer(buffer.begin(), buffer.begin() + i);
+        ASSERT_EQ(0, protocol::extractPacket(&current_buffer[0],
+                                             current_buffer.size(), 0x1000));
+    }
+}
+
 TEST_F(ProtocolTest, it_returns_the_payload_range_of_a_well_formed_packet) {
     uint8_t buffer[10] = { 0xB5, 0x62, 0x05, 1, 2, 3, 4, 5, 0x37, 0xF0 };
     auto payload = protocol::getPayload(buffer, buffer + 10);

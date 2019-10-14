@@ -29,7 +29,9 @@ int protocol::extractPacket(uint8_t const* buffer, size_t size,
     if (payload_length > max_payload_size) {
         return -1;
     }
-    if (size < payload_length + PACKET_MIN_OVERHEAD) {
+
+    uint8_t const* message_end = length_field_end + payload_length + 2;
+    if (buffer + size < message_end) {
         return 0;
     }
 
