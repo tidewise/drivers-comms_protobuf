@@ -6,9 +6,9 @@
 
   <depend package="base/cmake" />
   <depend package="drivers/iodrivers_base" />
-  <depend package="protobuf-compiler" />
-  <depend package="protobuf-cxx" />
 
+  <test_depend package="protobuf-compiler" />
+  <test_depend package="protobuf-cxx" />
   <test_depend package="google-test" />
   <test_depend package="google-mock" />
 </package>

@@ -1,25 +1,21 @@
 #ifndef COMMS_PROTOBUF_PROTOCOL_HPP
 #define COMMS_PROTOBUF_PROTOCOL_HPP
 
+#include <cstdint>
 #include <array>
 
 namespace comms_protobuf {
     /** Implementation of the framing protocol
      */
     namespace protocol {
+        struct InternalError : std::runtime_error {
+            using std::runtime_error::runtime_error;
+        };
+
         static const uint8_t PACKET_MIN_SIZE = 5;
-        static const uint8_t PACKET_OVERHEAD = 4;
 
-        /** Max 3 bytes in the size field
-         *
-         * This packet extraction simpler as we must have at least 3 valid
-         * bytes after the prologue (one size, two CRC)
-         */
-        static const uint32_t PACKET_MAX_PAYLOAD_SIZE_FIELD_LENGTH = 3;
-
-        /** Max 3 bytes in the size field
-         */
-        static const uint32_t PACKET_MAX_PAYLOAD_SIZE = 7*7*7;
+        /** Two bytes start, one byte for size and two bytes for CRC */
+        static const uint8_t PACKET_MIN_OVERHEAD = 5;
 
         static const uint8_t SYNC_0 = 0xB5;
         static const uint8_t SYNC_1 = 0x62;
@@ -33,16 +29,93 @@ namespace comms_protobuf {
         int extractPacket(uint8_t const* buffer, size_t size,
                           size_t max_payload_size);
 
+        /** Get the payload range
+         *
+         * The provided buffer is expected to have been validated with
+         * extractPacket
+         */
+        std::pair<uint8_t const*, uint8_t const*> getPayload(
+            uint8_t const* buffer, uint8_t const* buffer_end
+        );
+
         /** Extract variable-length integer field
          *
          * @arg buffer pointer on the length field. It is must have at
          *   least PAXKET_MAX_PAYLOAD_SIZE_FIELD_LENGTH bytes.
+         * @return the decoded size, and the past-the-end pointer after the
+         *   length field
          */
-        std::pair<uint32_t, uint8_t const*> parseLength(uint8_t const* begin);
+        std::pair<size_t, uint8_t const*> parseLength(
+            uint8_t const* begin, uint8_t const* end
+        );
+
+        /**
+         * Validate that a buffer with the given length would be big enough to
+         * contain a message with the provided payload length
+         *
+         * @return the actual encoded message length
+         */
+        size_t validateEncodingBufferSize(size_t buffer_length, size_t length);
+
+        /** Compute the size in bytes of the encoded version of the given length
+         */
+        size_t getLengthEncodedSize(size_t length);
+
+        /** Write variable-length integer field
+         *
+         * @arg buffer pointer on the length field
+         * @arg buffer_end pointer on the end of the available byte range.
+         *    The method throws std::invalid_argument if the encoded length
+         *    does not fit in the available buffer range.
+         * @arg length the length to be encoded
+         * @return past-the-end pointer after the encoded length field
+         */
+        uint8_t* encodeLength(uint8_t* buffer, uint8_t* buffer_end, size_t length);
+
+        /** Encode a frame containing the given bytes
+         *
+         * @arg buffer target buffer
+         * @arg payload the payload. This is a string as it is what Google's
+         *    protocol buffer C++ API uses
+         * @return the past-the-end pointer after the encoded frame
+         */
+        uint8_t* encodeFrame(uint8_t* buffer, uint8_t* buffer_end,
+                             uint8_t const* payload_begin,
+                             uint8_t const* payload_end);
 
         /** Computes the 2-byte checksum over the given buffer
          */
         uint16_t crc(uint8_t const* begin, uint8_t const* end);
+
+        /** Encode a frame containing the given protobuf message
+         *
+         * @return the past-the-end pointer after the encoded frame
+        */
+        template<typename Message>
+        uint8_t* encodeFrame(uint8_t* buffer, uint8_t* buffer_end,
+                             Message const& message) {
+            size_t payload_length = message.ByteSizeLong();
+            auto message_end = buffer + validateEncodingBufferSize(
+                buffer_end - buffer, payload_length
+            );
+
+            buffer[0] = SYNC_0;
+            buffer[1] = SYNC_1;
+
+            uint8_t* length_end = encodeLength(
+                buffer + 2, buffer_end, payload_length
+            );
+            message.SerializeWithCachedSizesToArray(length_end);
+
+            uint8_t* payload_end = length_end + payload_length;
+            if (payload_end + 2 != message_end) {
+                throw InternalError("message boundary calculations do not match");
+            }
+            uint16_t calculated_crc = crc(buffer + 2, payload_end);
+            payload_end[0] = calculated_crc & 0xFF;
+            payload_end[1] = (calculated_crc >> 8) & 0xFF;
+            return payload_end + 2;
+        }
     }
 }
 

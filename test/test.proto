@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+package test_channel;
+
+message Local {
+    oneof field {
+        int32 something = 1;
+        string something_else = 2;
+    }
+}
+
+message Remote {
+    oneof field {
+        string something = 3;
+        int32 something_else = 4;
+    }
+}
