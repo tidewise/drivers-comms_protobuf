@@ -94,7 +94,11 @@ namespace comms_protobuf {
         template<typename Message>
         uint8_t* encodeFrame(uint8_t* buffer, uint8_t* buffer_end,
                              Message const& message) {
+#if GOOGLE_PROTOBUF_VERSION >= 3006001
             size_t payload_length = message.ByteSizeLong();
+#else
+            size_t payload_length = message.ByteSize();
+#endif
             auto message_end = buffer + validateEncodingBufferSize(
                 buffer_end - buffer, payload_length
             );
