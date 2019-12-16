@@ -21,9 +21,15 @@ struct ChannelTest : public ::testing::Test, iodrivers_base::Fixture<TestChannel
         vector<uint8_t> marshalled(256);
         msg.SerializeToArray(&marshalled[0], marshalled.size());
 
+#if GOOGLE_PROTOBUF_VERSION >= 3006001
+        size_t message_size = msg.ByteSizeLong();
+#else
+        size_t message_size = msg.ByteSize();
+#endif
+
         uint8_t buffer[1024];
         uint8_t* end = protocol::encodeFrame(
-            buffer, buffer + 1024, &marshalled[0], &marshalled[0] + msg.ByteSizeLong()
+            buffer, buffer + 1024, &marshalled[0], &marshalled[0] + message_size
         );
         this->pushDataToDriver(buffer, end);
     }
