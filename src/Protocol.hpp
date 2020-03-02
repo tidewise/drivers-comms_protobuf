@@ -87,6 +87,30 @@ namespace comms_protobuf {
          */
         uint16_t crc(uint8_t const* begin, uint8_t const* end);
 
+        typedef std::array<uint8_t, 16> aes_tag;
+
+        struct CipherContext {
+            static const int KEY_SIZE = 32;
+            static const int MAX_BLOCK_LENGTH = 32;
+
+            uint8_t key[KEY_SIZE];
+            uint8_t iv[KEY_SIZE];
+
+            CipherContext(std::string const& psk);
+
+            static constexpr int getMaxCiphertextLength(size_t size) {
+                return size + MAX_BLOCK_LENGTH - 1;
+            }
+        };
+
+        size_t encrypt(CipherContext& ctx,
+                       uint8_t* ciphertext, aes_tag& tag,
+                       uint8_t const* plaintext, size_t plaintext_length);
+        size_t decrypt(CipherContext& ctx,
+                       uint8_t* plaintext,
+                       uint8_t const* ciphertext, size_t ciphertext_length,
+                       aes_tag& tag);
+
         /** Encode a frame containing the given protobuf message
          *
          * @return the past-the-end pointer after the encoded frame

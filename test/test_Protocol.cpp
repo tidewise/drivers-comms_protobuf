@@ -206,3 +206,67 @@ TEST_F(ProtocolTest, it_rejects_a_packet_whose_CRC_LSB_does_not_match) {
     uint8_t buffer[10] = { 0xB5, 0x62, 0x05, 1, 2, 3, 4, 5, 0x38, 0xF0 };
     ASSERT_EQ(-1, protocol::extractPacket(buffer, 10, 100));
 }
+
+TEST_F(ProtocolTest, it_encrypts_and_decrypts_a_plaintext) {
+    uint8_t buffer[10] = { 0xB5, 0x62, 0x05, 1, 2, 3, 4, 5, 0x38, 0xF0 };
+
+    uint8_t encrypted[protocol::CipherContext::getMaxCiphertextLength(10)];
+    size_t encrypted_size = 0;
+    protocol::aes_tag tag;
+    {
+        protocol::CipherContext encryption_ctx("some psk");
+        encrypted_size = protocol::encrypt(
+            encryption_ctx, encrypted, tag, buffer, 10
+        );
+    }
+    ASSERT_LE(encrypted_size, protocol::CipherContext::getMaxCiphertextLength(10));
+
+    uint8_t final[10];
+    size_t final_size;
+    {
+        protocol::CipherContext decryption_ctx("some psk");
+        final_size = protocol::decrypt(decryption_ctx, final,
+                                       encrypted, encrypted_size, tag);
+    }
+
+    ASSERT_EQ(10, final_size);
+    EXPECT_THAT(final, ElementsAreArray(buffer));
+}
+
+TEST_F(ProtocolTest, it_detects_modifications_to_the_tag) {
+    uint8_t buffer[10] = { 0xB5, 0x62, 0x05, 1, 2, 3, 4, 5, 0x38, 0xF0 };
+
+    uint8_t encrypted[protocol::CipherContext::getMaxCiphertextLength(10)];
+    protocol::CipherContext ctx("some psk");
+
+    protocol::aes_tag tag;
+    size_t encrypted_size = protocol::encrypt(
+        ctx, encrypted, tag, buffer, 10
+    );
+    tag[2] += 1;
+
+    uint8_t final[10];
+    ASSERT_THROW(
+        (protocol::decrypt(ctx, final, encrypted, encrypted_size, tag)),
+        std::runtime_error
+    );
+}
+
+TEST_F(ProtocolTest, it_detects_modifications_to_the_encrypted_data) {
+    uint8_t buffer[10] = { 0xB5, 0x62, 0x05, 1, 2, 3, 4, 5, 0x38, 0xF0 };
+
+    uint8_t encrypted[protocol::CipherContext::getMaxCiphertextLength(10)];
+    protocol::CipherContext ctx("some psk");
+
+    protocol::aes_tag tag;
+    size_t encrypted_size = protocol::encrypt(
+        ctx, encrypted, tag, buffer, 10
+    );
+    encrypted[2] += 1;
+
+    uint8_t final[10];
+    ASSERT_THROW(
+        (protocol::decrypt(ctx, final, encrypted, encrypted_size, tag)),
+        std::runtime_error
+    );
+}

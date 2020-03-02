@@ -68,3 +68,28 @@ TEST_F(ChannelTest, it_throws_if_receiving_a_message_that_is_valid_for_extractPa
 
     ASSERT_THROW(driver.read(), InvalidProtobufMessage);
 }
+
+struct SymmetricChannel : public Channel<test_channel::Local, test_channel::Local> {
+    typedef test_channel::Local Local;
+
+    SymmetricChannel()
+        : Channel<Local, Local>(100) {
+    }
+};
+
+struct EncryptedChannelTest :
+    public ::testing::Test, iodrivers_base::Fixture<SymmetricChannel> {
+};
+
+TEST_F(EncryptedChannelTest, it_can_handle_encrypted_communication) {
+    driver.openURI("test://");
+
+    test_channel::Local local;
+    local.set_something(10);
+    driver.write(local);
+
+    auto buffer = readDataFromDriver();
+    this->pushDataToDriver(buffer);
+    auto decrypted = driver.read();
+    ASSERT_EQ(10, decrypted.something());
+}
