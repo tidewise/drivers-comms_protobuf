@@ -1,8 +1,14 @@
-#include <cstring>
 #include <comms_protobuf/Protocol.hpp>
+
+#include <cstring>
+#include <openssl/rand.h>
+#include <openssl/evp.h>
 
 using namespace std;
 using namespace comms_protobuf;
+
+static_assert(protocol::CipherContext::MAX_BLOCK_LENGTH == EVP_MAX_BLOCK_LENGTH,
+              "max block length differ between EVP (OpenSSL) and our internal value");
 
 int protocol::extractPacket(uint8_t const* buffer, size_t size,
                             size_t max_payload_size) {
@@ -163,4 +169,93 @@ size_t protocol::validateEncodingBufferSize(
         );
     }
     return expected_buffer_length;
+}
+
+protocol::CipherContext::CipherContext(string const& psk) {
+    static const int NROUNDS = 1000000;
+    int i = EVP_BytesToKey(
+        EVP_aes_256_gcm(), EVP_sha256(),
+        nullptr, // salt
+        reinterpret_cast<uint8_t const*>(&psk[0]), psk.length(), NROUNDS, key, iv
+    );
+    if (i != KEY_SIZE) {
+        throw std::runtime_error("failed key derivation");
+    }
+}
+
+struct ContextGuard {
+    EVP_CIPHER_CTX*& ctx;
+    ContextGuard(EVP_CIPHER_CTX*& ctx)
+        : ctx(ctx) {
+        ctx = EVP_CIPHER_CTX_new();
+    }
+    ContextGuard(ContextGuard&) = delete;
+    ~ContextGuard() {
+        EVP_CIPHER_CTX_free(ctx);
+    }
+};
+
+size_t protocol::encrypt(CipherContext& ctx_,
+                         uint8_t* ciphertext, aes_tag& tag,
+                         uint8_t const* plaintext, size_t plaintext_length) {
+
+    EVP_CIPHER_CTX* ctx;
+    ContextGuard guard(ctx);
+
+    /* Initialise the encryption operation. */
+    if (!EVP_EncryptInit_ex(ctx, EVP_aes_256_gcm(), NULL, ctx_.key, ctx_.iv)) {
+        throw std::runtime_error("encrypt: failed to initialize the AES 256 GCM cypher");
+    }
+
+    int encrypted_length = 0;
+    int operation_length = 0;
+    if (1 != EVP_EncryptUpdate(ctx, ciphertext, &operation_length,
+                              plaintext, plaintext_length)) {
+        throw std::runtime_error("encrypt: encryption failed");
+    }
+    encrypted_length += operation_length;
+
+    if (1 != EVP_EncryptFinal_ex(ctx, ciphertext + encrypted_length, &operation_length)) {
+        throw std::runtime_error("encrypt: finalization failed");
+    }
+    encrypted_length += operation_length;
+
+    if (1 != EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_GET_TAG, 16, &tag[0])) {
+        throw std::runtime_error("encrypt: failed to get the AES tag");
+    }
+
+    return encrypted_length;
+}
+
+size_t protocol::decrypt(CipherContext& ctx_,
+                         uint8_t* plaintext,
+                         uint8_t const* ciphertext, size_t ciphertext_length,
+                         aes_tag& tag) {
+
+    EVP_CIPHER_CTX* ctx;
+    ContextGuard guard(ctx);
+
+    if (!EVP_DecryptInit_ex(ctx, EVP_aes_256_gcm(), NULL, ctx_.key, ctx_.iv)) {
+        throw std::runtime_error("encrypt: failed to initialize the AES 256 GCM cipher");
+    }
+
+    int decrypted_length = 0;
+    int operation_length = 0;
+    if (1 != EVP_DecryptUpdate(ctx, plaintext, &operation_length,
+                               ciphertext, ciphertext_length)) {
+        throw std::runtime_error("encrypt: decryption failed");
+    }
+    decrypted_length += operation_length;
+
+    if (1 != EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_TAG,
+                                 16, const_cast<uint8_t*>(&tag[0]))) {
+        throw std::runtime_error("encrypt: failed to set the AES tag");
+    }
+
+    if (1 != EVP_DecryptFinal_ex(ctx, plaintext + decrypted_length, &operation_length)) {
+        throw std::runtime_error("encrypt: message validation failed");
+    }
+    decrypted_length += operation_length;
+
+    return decrypted_length;
 }
