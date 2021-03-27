@@ -99,7 +99,7 @@ namespace comms_protobuf {
             CipherContext(std::string const& psk);
 
             static constexpr int getMaxCiphertextLength(size_t size) {
-                return size + MAX_BLOCK_LENGTH - 1;
+                return size + MAX_BLOCK_LENGTH - 1 + sizeof(aes_tag);
             }
         };
 

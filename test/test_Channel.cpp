@@ -82,6 +82,7 @@ struct EncryptedChannelTest :
 };
 
 TEST_F(EncryptedChannelTest, it_can_handle_encrypted_communication) {
+    driver.setEncryptionKey("test");
     driver.openURI("test://");
 
     test_channel::Local local;
@@ -92,4 +93,19 @@ TEST_F(EncryptedChannelTest, it_can_handle_encrypted_communication) {
     this->pushDataToDriver(buffer);
     auto decrypted = driver.read();
     ASSERT_EQ(10, decrypted.something());
+}
+
+TEST_F(EncryptedChannelTest, it_rejects_a_communication_with_the_wrong_key) {
+    driver.setEncryptionKey("test");
+    driver.openURI("test://");
+
+    test_channel::Local local;
+    local.set_something(10);
+    driver.write(local);
+
+    auto buffer = readDataFromDriver();
+
+    driver.setEncryptionKey("other");
+    this->pushDataToDriver(buffer);
+    ASSERT_THROW(driver.read(), std::runtime_error);
 }

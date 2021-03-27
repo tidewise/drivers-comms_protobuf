@@ -77,6 +77,7 @@ namespace comms_protobuf {
             size_t encryptedPayloadSize =
                 protocol::CipherContext::getMaxCiphertextLength(m_max_message_size);
 
+            m_ciphertext_buffer.resize(encryptedPayloadSize);
             m_io_buffer.resize(getBufferSizeFromMessageSize(encryptedPayloadSize));
             m_plaintext_buffer.resize(
                 getBufferSizeFromMessageSize(m_max_message_size)
@@ -140,15 +141,17 @@ namespace comms_protobuf {
 
                 protocol::aes_tag tag;
                 size_t ciphertext_length = protocol::encrypt(
-                    *m_cipher, &m_ciphertext_buffer[0], tag,
+                    *m_cipher, &m_ciphertext_buffer[sizeof(tag)], tag,
                     &m_plaintext_buffer[0], serialized_length
                 );
+
+                std::copy(tag.begin(), tag.end(), m_ciphertext_buffer.begin());
 
                 end = protocol::encodeFrame(
                     m_io_buffer.data(),
                     m_io_buffer.data() + m_io_buffer.size(),
                     m_ciphertext_buffer.data(),
-                    m_ciphertext_buffer.data() + ciphertext_length
+                    m_ciphertext_buffer.data() + ciphertext_length + sizeof(tag)
                 );
             }
             else {
