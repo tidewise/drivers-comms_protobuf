@@ -5,6 +5,13 @@
 #include <array>
 
 namespace comms_protobuf {
+    struct DecryptionFailed : std::runtime_error {
+        using std::runtime_error::runtime_error;
+    };
+    struct EncryptionFailed : std::runtime_error {
+        using std::runtime_error::runtime_error;
+    };
+
     /** Implementation of the framing protocol
      */
     namespace protocol {

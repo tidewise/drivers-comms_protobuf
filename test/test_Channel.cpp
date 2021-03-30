@@ -107,5 +107,5 @@ TEST_F(EncryptedChannelTest, it_rejects_a_communication_with_the_wrong_key) {
 
     driver.setEncryptionKey("other");
     this->pushDataToDriver(buffer);
-    ASSERT_THROW(driver.read(), std::runtime_error);
+    ASSERT_THROW(driver.read(), DecryptionFailed);
 }
