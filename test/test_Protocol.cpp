@@ -248,7 +248,7 @@ TEST_F(ProtocolTest, it_detects_modifications_to_the_tag) {
     uint8_t final[10];
     ASSERT_THROW(
         (protocol::decrypt(ctx, final, encrypted, encrypted_size, tag)),
-        std::runtime_error
+        DecryptionFailed
     );
 }
 
@@ -267,6 +267,6 @@ TEST_F(ProtocolTest, it_detects_modifications_to_the_encrypted_data) {
     uint8_t final[10];
     ASSERT_THROW(
         (protocol::decrypt(ctx, final, encrypted, encrypted_size, tag)),
-        std::runtime_error
+        DecryptionFailed
     );
 }

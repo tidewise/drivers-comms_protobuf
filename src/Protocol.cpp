@@ -204,24 +204,24 @@ size_t protocol::encrypt(CipherContext& ctx_,
 
     /* Initialise the encryption operation. */
     if (!EVP_EncryptInit_ex(ctx, EVP_aes_256_gcm(), NULL, ctx_.key, ctx_.iv)) {
-        throw std::runtime_error("encrypt: failed to initialize the AES 256 GCM cypher");
+        throw EncryptionFailed("encrypt: failed to initialize the AES 256 GCM cypher");
     }
 
     int encrypted_length = 0;
     int operation_length = 0;
     if (1 != EVP_EncryptUpdate(ctx, ciphertext, &operation_length,
                               plaintext, plaintext_length)) {
-        throw std::runtime_error("encrypt: encryption failed");
+        throw EncryptionFailed("encrypt: encryption failed");
     }
     encrypted_length += operation_length;
 
     if (1 != EVP_EncryptFinal_ex(ctx, ciphertext + encrypted_length, &operation_length)) {
-        throw std::runtime_error("encrypt: finalization failed");
+        throw EncryptionFailed("encrypt: finalization failed");
     }
     encrypted_length += operation_length;
 
     if (1 != EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_GET_TAG, 16, &tag[0])) {
-        throw std::runtime_error("encrypt: failed to get the AES tag");
+        throw EncryptionFailed("encrypt: failed to get the AES tag");
     }
 
     return encrypted_length;
@@ -236,24 +236,24 @@ size_t protocol::decrypt(CipherContext& ctx_,
     ContextGuard guard(ctx);
 
     if (!EVP_DecryptInit_ex(ctx, EVP_aes_256_gcm(), NULL, ctx_.key, ctx_.iv)) {
-        throw std::runtime_error("encrypt: failed to initialize the AES 256 GCM cipher");
+        throw DecryptionFailed("encrypt: failed to initialize the AES 256 GCM cipher");
     }
 
     int decrypted_length = 0;
     int operation_length = 0;
     if (1 != EVP_DecryptUpdate(ctx, plaintext, &operation_length,
                                ciphertext, ciphertext_length)) {
-        throw std::runtime_error("encrypt: decryption failed");
+        throw DecryptionFailed("encrypt: decryption failed");
     }
     decrypted_length += operation_length;
 
     if (1 != EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_TAG,
                                  16, const_cast<uint8_t*>(&tag[0]))) {
-        throw std::runtime_error("encrypt: failed to set the AES tag");
+        throw DecryptionFailed("encrypt: failed to set the AES tag");
     }
 
     if (1 != EVP_DecryptFinal_ex(ctx, plaintext + decrypted_length, &operation_length)) {
-        throw std::runtime_error("encrypt: message validation failed");
+        throw DecryptionFailed("encrypt: message validation failed");
     }
     decrypted_length += operation_length;
 

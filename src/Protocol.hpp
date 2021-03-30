@@ -5,6 +5,13 @@
 #include <array>
 
 namespace comms_protobuf {
+    struct DecryptionFailed : std::runtime_error {
+        using std::runtime_error::runtime_error;
+    };
+    struct EncryptionFailed : std::runtime_error {
+        using std::runtime_error::runtime_error;
+    };
+
     /** Implementation of the framing protocol
      */
     namespace protocol {
@@ -99,7 +106,7 @@ namespace comms_protobuf {
             CipherContext(std::string const& psk);
 
             static constexpr int getMaxCiphertextLength(size_t size) {
-                return size + MAX_BLOCK_LENGTH - 1;
+                return size + MAX_BLOCK_LENGTH - 1 + sizeof(aes_tag);
             }
         };
 
