@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <array>
+#include <stdexcept>
 
 namespace comms_protobuf {
     struct DecryptionFailed : std::runtime_error {
@@ -18,6 +19,9 @@ namespace comms_protobuf {
         struct InternalError : std::runtime_error {
             using std::runtime_error::runtime_error;
         };
+
+        using size_t = std::size_t;
+        using uint8_t = std::uint8_t;
 
         static const uint8_t PACKET_MIN_SIZE = 5;
 
